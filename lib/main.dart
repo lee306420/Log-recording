@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
+import 'package:geolocator/geolocator.dart';
 
 void main() {
   runApp(const MyApp());
@@ -1080,6 +1081,93 @@ class _LogListPageState extends State<LogListPage> {
       },
     );
   }
+
+  Future<void> _requestLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('定位服务未开启'),
+            content: const Text('请在系统设置中开启定位服务'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('定位权限被永久拒绝'),
+            content: const Text('请在系统设置中开启定位权限'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await Geolocator.openAppSettings();
+                  Navigator.pop(context);
+                },
+                child: const Text('去设置'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+  }
+
+  Future<Position?> _getCurrentLocation() async {
+    try {
+      await _requestLocationPermission();
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (e) {
+      debugPrint('获取位置失败: $e');
+      return null;
+    }
+  }
+
+  Future<void> _addLogWithLocation({
+    required String text,
+    String? imagePath,
+    String? videoPath,
+  }) async {
+    final position = await _getCurrentLocation();
+    setState(() {
+      _logs.add(LogEntry(
+        text: text,
+        imagePath: imagePath,
+        videoPath: videoPath,
+        timestamp: DateTime.now(),
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      ));
+    });
+    await _saveLogs();
+  }
 }
 
 class TimelineEntry extends StatefulWidget {
@@ -1375,8 +1463,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         ),
                       );
                     }
-                  } catch (e) {
-                    print('Error getting full image path: $e');
+                  } catch (error) {
+                    print('Error getting full image path: $error');
                   }
                 } else if (widget.log.videoPath != null) {
                   final logListState =
@@ -1403,8 +1491,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         ),
                       );
                     }
-                  } catch (e) {
-                    print('Error getting full video path: $e');
+                  } catch (error) {
+                    print('Error getting full video path: $error');
                   }
                 }
               },
@@ -1706,12 +1794,18 @@ class LogEntry {
   final String? imagePath;
   final String? videoPath;
   final DateTime timestamp;
+  final double? latitude;
+  final double? longitude;
+  final String? address;
 
   LogEntry({
     required this.text,
     this.imagePath,
     this.videoPath,
     required this.timestamp,
+    this.latitude,
+    this.longitude,
+    this.address,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1719,6 +1813,9 @@ class LogEntry {
         'imagePath': imagePath != null ? path.basename(imagePath!) : null,
         'videoPath': videoPath != null ? path.basename(videoPath!) : null,
         'timestamp': timestamp.toIso8601String(),
+        'latitude': latitude,
+        'longitude': longitude,
+        'address': address,
       };
 
   factory LogEntry.fromJson(Map<String, dynamic> json) => LogEntry(
@@ -1728,6 +1825,9 @@ class LogEntry {
         videoPath:
             json['videoPath'] != null ? json['videoPath'] as String : null,
         timestamp: DateTime.parse(json['timestamp'] as String),
+        latitude: json['latitude'] as double?,
+        longitude: json['longitude'] as double?,
+        address: json['address'] as String?,
       );
 }
 
