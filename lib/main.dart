@@ -145,15 +145,6 @@ class _LogListPageState extends State<LogListPage> {
             },
             tooltip: '选择日期',
           ),
-          IconButton(
-            icon: const Icon(Icons.all_inbox),
-            onPressed: () {
-              setState(() {
-                _selectedDate = null;
-              });
-            },
-            tooltip: '显示全部',
-          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56.0),
@@ -245,10 +236,324 @@ class _LogListPageState extends State<LogListPage> {
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _addNewLog(context),
-        child: const Icon(Icons.add),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            FloatingActionButton(
+              heroTag: 'text',
+              onPressed: () async {
+                String text = '';
+                await showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (BuildContext context) {
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.of(context).viewInsets.bottom,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                              decoration: const InputDecoration(
+                                hintText: '写下此刻的想法...',
+                                border: OutlineInputBorder(),
+                              ),
+                              maxLines: 3,
+                              onChanged: (value) => text = value,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: () {
+                                if (text.isNotEmpty) {
+                                  Navigator.pop(context);
+                                  setState(() {
+                                    _logs.add(LogEntry(
+                                      text: text,
+                                      timestamp: DateTime.now(),
+                                    ));
+                                  });
+                                  _saveLogs();
+                                }
+                              },
+                              child: const Text('保存'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+              child: const Icon(Icons.edit_note),
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'gallery',
+              onPressed: () async {
+                // 显示选择对话框
+                final choice = await showDialog<String>(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      title: const Text(
+                        '选择类型',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 20),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.photo,
+                                color: Colors.blue,
+                                size: 28,
+                              ),
+                            ),
+                            title: const Text(
+                              '选择图片',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            onTap: () => Navigator.pop(context, 'image'),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 8,
+                            ),
+                            hoverColor: Colors.blue.shade50,
+                          ),
+                          const Divider(height: 1),
+                          ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade50,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.video_library,
+                                color: Colors.purple,
+                                size: 28,
+                              ),
+                            ),
+                            title: const Text(
+                              '选择视频',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            onTap: () => Navigator.pop(context, 'video'),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 8,
+                            ),
+                            hoverColor: Colors.purple.shade50,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+
+                if (choice == null) return;
+
+                final ImagePicker picker = ImagePicker();
+                if (choice == 'image') {
+                  final XFile? photo = await picker.pickImage(
+                    source: ImageSource.gallery,
+                    imageQuality: 100,
+                  );
+                  if (photo != null) {
+                    final imagePath = await _copyImageToLocal(photo.path);
+                    if (imagePath != null) {
+                      String text = '';
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (BuildContext context) {
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              bottom: MediaQuery.of(context).viewInsets.bottom,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextField(
+                                    decoration: const InputDecoration(
+                                      hintText: '为这张照片添加描述...',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    maxLines: 3,
+                                    onChanged: (value) => text = value,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      setState(() {
+                                        _logs.add(LogEntry(
+                                          text: text,
+                                          imagePath: imagePath,
+                                          timestamp: DateTime.now(),
+                                        ));
+                                      });
+                                      _saveLogs();
+                                    },
+                                    child: const Text('保存'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  }
+                } else if (choice == 'video') {
+                  final XFile? video = await picker.pickVideo(
+                    source: ImageSource.gallery,
+                    maxDuration: const Duration(minutes: 10),
+                  );
+                  if (video != null) {
+                    final videoPath = await _copyVideoToLocal(video.path);
+                    if (videoPath != null) {
+                      String text = '';
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (BuildContext context) {
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              bottom: MediaQuery.of(context).viewInsets.bottom,
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextField(
+                                    decoration: const InputDecoration(
+                                      hintText: '为这段视频添加描述...',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    maxLines: 3,
+                                    onChanged: (value) => text = value,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      setState(() {
+                                        _logs.add(LogEntry(
+                                          text: text,
+                                          videoPath: videoPath,
+                                          timestamp: DateTime.now(),
+                                        ));
+                                      });
+                                      _saveLogs();
+                                    },
+                                    child: const Text('保存'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  }
+                }
+              },
+              child: const Icon(Icons.photo_library),
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'camera',
+              onPressed: () async {
+                final ImagePicker picker = ImagePicker();
+                final XFile? photo = await picker.pickImage(
+                  source: ImageSource.camera,
+                  imageQuality: 100,
+                  preferredCameraDevice: CameraDevice.rear,
+                );
+                if (photo != null) {
+                  final imagePath = await _copyImageToLocal(photo.path);
+                  if (imagePath != null) {
+                    String text = '';
+                    await showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (BuildContext context) {
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: MediaQuery.of(context).viewInsets.bottom,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextField(
+                                  decoration: const InputDecoration(
+                                    hintText: '为这张照片添加描述...',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  maxLines: 3,
+                                  onChanged: (value) => text = value,
+                                ),
+                                const SizedBox(height: 16),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    setState(() {
+                                      _logs.add(LogEntry(
+                                        text: text,
+                                        imagePath: imagePath,
+                                        timestamp: DateTime.now(),
+                                      ));
+                                    });
+                                    _saveLogs();
+                                  },
+                                  child: const Text('保存'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }
+                }
+              },
+              child: const Icon(Icons.camera_alt),
+            ),
+          ],
+        ),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -886,208 +1191,253 @@ class _TimelineEntryState extends State<TimelineEntry> {
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        children: [
-          Container(
-            width: 60,
-            margin: const EdgeInsets.only(left: 8),
-            child: Column(
-              children: [
-                Container(
-                  width: 2,
-                  height: 24,
-                  color: widget.isFirst ? Colors.transparent : Colors.blue,
-                ),
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.blue,
-                      width: 2,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _getTimePeriod(widget.log.timestamp),
-                        style: TextStyle(
-                          color: Colors.blue[700],
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        DateFormat('dd').format(widget.log.timestamp),
-                        style: TextStyle(
-                          color: Colors.blue[700],
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Container(
-                    width: 2,
-                    color: widget.isLast ? Colors.transparent : Colors.blue,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Dismissible(
-              key: ValueKey(widget.log.timestamp.toString()),
-              direction: DismissDirection.endToStart,
-              confirmDismiss: (direction) async {
-                await showModalBottomSheet(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return Container(
-                      height: 120,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          Column(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit,
-                                    color: Colors.blue, size: 32),
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  widget.onEdit();
-                                },
-                              ),
-                              const Text('编辑',
-                                  style: TextStyle(color: Colors.blue)),
-                            ],
-                          ),
-                          Column(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.delete,
-                                    color: Colors.red, size: 32),
-                                onPressed: () {
-                                  Navigator.pop(context);
-                                  _showDeleteConfirmation(context);
-                                },
-                              ),
-                              const Text('删除',
-                                  style: TextStyle(color: Colors.red)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-                return false;
-              },
-              background: Container(
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 20.0),
-                color: Colors.red[100],
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+    return Row(
+      children: [
+        Container(
+          width: 60,
+          margin: const EdgeInsets.only(left: 8),
+          child: Stack(
+            children: [
+              SizedBox(
+                height:
+                    widget.log.imagePath != null || widget.log.videoPath != null
+                        ? 280 // 有图片或视频时的高度
+                        : 140, // 只有文本时的高度
+                child: Stack(
                   children: [
-                    Icon(
-                      Icons.swipe_left,
-                      color: Colors.red,
-                      size: 28,
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      '左滑操作',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
+                    Positioned(
+                      top: 0,
+                      bottom: 0,
+                      left: 29,
+                      child: Container(
+                        width: 2,
+                        color: Colors.blue,
                       ),
                     ),
+                    Positioned(
+                      top: widget.log.imagePath != null ||
+                              widget.log.videoPath != null
+                          ? 90 // 有图片或视频时圆点的位置
+                          : 45, // 只有文本时圆点的位置
+                      left: 5,
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.blue,
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.2),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            _getTimePeriod(widget.log.timestamp),
+                            style: TextStyle(
+                              color: Colors.blue[700],
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (widget.isFirst)
+                      const Positioned(
+                        top: 0,
+                        left: 29,
+                        child: SizedBox(
+                          width: 2,
+                          height: 50,
+                          child: ColoredBox(color: Colors.white),
+                        ),
+                      ),
+                    if (widget.isLast)
+                      Positioned(
+                        bottom: 0,
+                        left: 29,
+                        child: SizedBox(
+                          width: 2,
+                          height: 50,
+                          child: ColoredBox(color: Colors.white),
+                        ),
+                      ),
                   ],
                 ),
               ),
-              child: GestureDetector(
-                onDoubleTap: () async {
-                  if (widget.log.imagePath != null) {
-                    final logListState =
-                        context.findAncestorStateOfType<_LogListPageState>();
-                    if (logListState == null) {
-                      print('Error: Could not find _LogListPageState');
-                      return;
-                    }
-
-                    try {
-                      final fullPath = await logListState
-                          .getFullImagePath(widget.log.imagePath!);
-                      print('Full image path: $fullPath');
-
-                      if (context.mounted) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ImagePreviewPage(
-                              imagePath: fullPath,
-                              timestamp: widget.log.timestamp,
-                              text: widget.log.text,
+            ],
+          ),
+        ),
+        Expanded(
+          child: Dismissible(
+            key: ValueKey(widget.log.timestamp.toString()),
+            direction: DismissDirection.endToStart,
+            confirmDismiss: (direction) async {
+              await showModalBottomSheet(
+                context: context,
+                builder: (BuildContext context) {
+                  return Container(
+                    height: 120,
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Column(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit,
+                                  color: Colors.blue, size: 32),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                widget.onEdit();
+                              },
                             ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      print('Error getting full image path: $e');
-                    }
-                  } else if (widget.log.videoPath != null) {
-                    final logListState =
-                        context.findAncestorStateOfType<_LogListPageState>();
-                    if (logListState == null) {
-                      print('Error: Could not find _LogListPageState');
-                      return;
-                    }
-
-                    try {
-                      final fullPath = await logListState
-                          .getFullVideoPath(widget.log.videoPath!);
-                      print('Full video path: $fullPath');
-
-                      if (context.mounted) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => VideoPreviewPage(
-                              videoPath: fullPath,
-                              timestamp: widget.log.timestamp,
-                              text: widget.log.text,
+                            const Text('编辑',
+                                style: TextStyle(color: Colors.blue)),
+                          ],
+                        ),
+                        Column(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.delete,
+                                  color: Colors.red, size: 32),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _showDeleteConfirmation(context);
+                              },
                             ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      print('Error getting full video path: $e');
-                    }
-                  }
-                },
-                child: Card(
-                  margin: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    side: BorderSide(
-                      color: Colors.black.withOpacity(0.5),
-                      width: 1.5,
+                            const Text('删除',
+                                style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ],
                     ),
+                  );
+                },
+              );
+              return false;
+            },
+            background: Container(
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 20.0),
+              color: Colors.red[100],
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(
+                    Icons.swipe_left,
+                    color: Colors.red,
+                    size: 28,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    '左滑操作',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            child: GestureDetector(
+              onDoubleTap: () async {
+                if (widget.log.imagePath != null) {
+                  final logListState =
+                      context.findAncestorStateOfType<_LogListPageState>();
+                  if (logListState == null) {
+                    print('Error: Could not find _LogListPageState');
+                    return;
+                  }
+
+                  try {
+                    final fullPath = await logListState
+                        .getFullImagePath(widget.log.imagePath!);
+                    print('Full image path: $fullPath');
+
+                    if (context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ImagePreviewPage(
+                            imagePath: fullPath,
+                            timestamp: widget.log.timestamp,
+                            text: widget.log.text,
+                          ),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    print('Error getting full image path: $e');
+                  }
+                } else if (widget.log.videoPath != null) {
+                  final logListState =
+                      context.findAncestorStateOfType<_LogListPageState>();
+                  if (logListState == null) {
+                    print('Error: Could not find _LogListPageState');
+                    return;
+                  }
+
+                  try {
+                    final fullPath = await logListState
+                        .getFullVideoPath(widget.log.videoPath!);
+                    print('Full video path: $fullPath');
+
+                    if (context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => VideoPreviewPage(
+                            videoPath: fullPath,
+                            timestamp: widget.log.timestamp,
+                            text: widget.log.text,
+                          ),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    print('Error getting full video path: $e');
+                  }
+                }
+              },
+              child: Card(
+                margin: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                elevation: 8,
+                shadowColor: Colors.blue.withOpacity(0.3),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white,
+                        Colors.blue.shade50.withOpacity(0.5),
+                      ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.white.withOpacity(0.9),
+                        blurRadius: 15,
+                        offset: const Offset(-5, -5),
+                      ),
+                      BoxShadow(
+                        color: Colors.blue.withOpacity(0.2),
+                        blurRadius: 15,
+                        offset: const Offset(5, 5),
+                      ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1121,7 +1471,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                                         .format(widget.log.timestamp),
                                     style: const TextStyle(
                                       color: Colors.white,
-                                      fontSize: 12,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
                                       shadows: [
                                         Shadow(
                                           offset: Offset(1, 1),
@@ -1173,7 +1524,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                                             .format(widget.log.timestamp),
                                         style: const TextStyle(
                                           color: Colors.white,
-                                          fontSize: 12,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
                                           shadows: [
                                             Shadow(
                                               offset: Offset(1, 1),
@@ -1200,7 +1552,7 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         ),
                         child: Container(
                           width: double.infinity,
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             gradient: LinearGradient(
@@ -1215,7 +1567,7 @@ class _TimelineEntryState extends State<TimelineEntry> {
                           child: Text(
                             widget.log.text,
                             style: const TextStyle(
-                              fontSize: 16,
+                              fontSize: 15,
                               height: 1.4,
                             ),
                           ),
@@ -1227,8 +1579,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1251,7 +1603,7 @@ class _TimelineEntryState extends State<TimelineEntry> {
           tag: widget.log.imagePath!,
           child: Image.file(
             File(snapshot.data!),
-            height: 200,
+            height: 180,
             width: double.infinity,
             fit: BoxFit.cover,
             errorBuilder: (context, error, stackTrace) {
