@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'dart:io';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:file_picker/file_picker.dart';
@@ -11,6 +12,8 @@ import 'package:path/path.dart' as path;
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -54,6 +57,11 @@ class _LogListPageState extends State<LogListPage> {
   String _searchQuery = '';
   DateTime? _selectedDate;
   String? _customStoragePath;
+  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  final FlutterSoundPlayer _player = FlutterSoundPlayer();
+  bool _isRecording = false;
+  bool _isPlayingPreview = false;
+  bool _isSearchingAllDates = false;
 
   @override
   void initState() {
@@ -67,19 +75,30 @@ class _LogListPageState extends State<LogListPage> {
         await _showInitialStorageDialog(context);
       }
       await _loadLogs();
+      await _initRecorder();
     });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _recorder.closeRecorder();
+    _player.closePlayer();
     super.dispose();
   }
 
   List<LogEntry> get _filteredLogs {
     List<LogEntry> logs = _logs;
 
-    if (_selectedDate != null) {
+    if (_searchQuery.isNotEmpty) {
+      logs = logs.where((log) {
+        final text = log.text.toLowerCase();
+        final query = _searchQuery.toLowerCase();
+        return text.contains(query);
+      }).toList();
+    }
+
+    if (!_isSearchingAllDates && _selectedDate != null) {
       logs = logs.where((log) {
         final logDate = DateTime(
           log.timestamp.year,
@@ -95,30 +114,28 @@ class _LogListPageState extends State<LogListPage> {
       }).toList();
     }
 
-    if (_searchQuery.isEmpty) {
-      return logs;
-    }
-    return logs.where((log) {
-      final text = log.text.toLowerCase();
-      final query = _searchQuery.toLowerCase();
-      return text.contains(query);
-    }).toList();
+    return logs;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 70,
         title: const Text('我的日记'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.folder),
+            iconSize: 24,
+            padding: const EdgeInsets.all(12),
             onPressed: () => _showStorageSettings(context),
             tooltip: '存储位置设置',
           ),
           IconButton(
             icon: const Icon(Icons.calendar_today),
+            iconSize: 24,
+            padding: const EdgeInsets.all(12),
             onPressed: () async {
               final DateTime? picked = await showDatePicker(
                 context: context,
@@ -146,12 +163,39 @@ class _LogListPageState extends State<LogListPage> {
             },
             tooltip: '选择日期',
           ),
+          IconButton(
+            icon: const Icon(Icons.date_range),
+            iconSize: 30,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (BuildContext context) {
+                  return Dialog(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: DateListDialog(
+                      dates: _getUniqueDates(),
+                      onSelectDate: (date) {
+                        setState(() {
+                          _selectedDate = date;
+                        });
+                        Navigator.pop(context);
+                      },
+                      getLogCount: _getLogCountForDate,
+                    ),
+                  );
+                },
+              );
+            },
+            tooltip: '所有日期',
+          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56.0),
           child: Column(
             children: [
-              if (_selectedDate != null)
+              if (_selectedDate != null && !_isSearchingAllDates)
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Text(
@@ -161,57 +205,94 @@ class _LogListPageState extends State<LogListPage> {
                 ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: '搜索日志内容...',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () {
-                              setState(() {
-                                _searchController.clear();
-                                _searchQuery = '';
-                              });
-                            },
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: _isSearchingAllDates
+                              ? '搜索全部日志...'
+                              : '搜索当前日期的日志...',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    setState(() {
+                                      _searchController.clear();
+                                      _searchQuery = '';
+                                    });
+                                  },
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                      ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color:
+                            _isSearchingAllDates ? Colors.blue : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.blue,
+                          width: 1,
+                        ),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.all_inclusive,
+                          color:
+                              _isSearchingAllDates ? Colors.white : Colors.blue,
+                        ),
+                        tooltip: _isSearchingAllDates ? '仅搜索当前日期' : '搜索全部日期',
+                        onPressed: () {
+                          setState(() {
+                            _isSearchingAllDates = !_isSearchingAllDates;
+                            if (!_isSearchingAllDates) {
+                              _searchController.clear();
+                              _searchQuery = '';
+                            }
+                          });
+                        },
+                      ),
                     ),
-                  ),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
+                  ],
                 ),
               ),
             ],
           ),
         ),
       ),
-      body: _filteredLogs.isEmpty
+      body: _isSearchingAllDates && _searchQuery.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    Icons.search_off,
+                    Icons.search,
                     size: 64,
                     color: Colors.grey[400],
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
+                    '请输入搜索内容',
                     style: TextStyle(
                       fontSize: 16,
                       color: Colors.grey[600],
@@ -220,23 +301,44 @@ class _LogListPageState extends State<LogListPage> {
                 ],
               ),
             )
-          : ListView.builder(
-              itemCount: _filteredLogs.length,
-              itemBuilder: (context, index) {
-                final log = _filteredLogs[index];
-                return TimelineEntry(
-                  log: log,
-                  isFirst: index == 0,
-                  isLast: index == _filteredLogs.length - 1,
-                  onEdit: () => _editLog(
-                    context,
-                    _logs.indexOf(log),
-                    log,
+          : _filteredLogs.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.search_off,
+                        size: 64,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
                   ),
-                  onDelete: () => _deleteLog(_logs.indexOf(log)),
-                );
-              },
-            ),
+                )
+              : ListView.builder(
+                  itemCount: _filteredLogs.length,
+                  itemBuilder: (context, index) {
+                    final log = _filteredLogs[index];
+                    return TimelineEntry(
+                      log: log,
+                      isFirst: index == 0,
+                      isLast: index == _filteredLogs.length - 1,
+                      onEdit: () => _editLog(
+                        context,
+                        _logs.indexOf(log),
+                        log,
+                      ),
+                      onDelete: () => _deleteLog(_logs.indexOf(log)),
+                    );
+                  },
+                ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Column(
@@ -246,49 +348,7 @@ class _LogListPageState extends State<LogListPage> {
               heroTag: 'text',
               onPressed: () async {
                 String text = '';
-                await showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (BuildContext context) {
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(context).viewInsets.bottom,
-                      ),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextField(
-                              decoration: const InputDecoration(
-                                hintText: '写下此刻的想法...',
-                                border: OutlineInputBorder(),
-                              ),
-                              maxLines: 3,
-                              onChanged: (value) => text = value,
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: () {
-                                if (text.isNotEmpty) {
-                                  Navigator.pop(context);
-                                  setState(() {
-                                    _logs.add(LogEntry(
-                                      text: text,
-                                      timestamp: DateTime.now(),
-                                    ));
-                                  });
-                                  _saveLogs();
-                                }
-                              },
-                              child: const Text('保存'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
+                await _addNewLog(context);
               },
               child: const Icon(Icons.edit_note),
             ),
@@ -551,6 +611,19 @@ class _LogListPageState extends State<LogListPage> {
               },
               child: const Icon(Icons.camera_alt),
             ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'audio',
+              onPressed: () {
+                if (_isRecording) {
+                  _stopRecording();
+                } else {
+                  _startRecording();
+                }
+              },
+              backgroundColor: _isRecording ? Colors.red : null,
+              child: Icon(_isRecording ? Icons.stop : Icons.mic),
+            ),
           ],
         ),
       ),
@@ -559,158 +632,188 @@ class _LogListPageState extends State<LogListPage> {
   }
 
   Future<void> _addNewLog(BuildContext context) async {
-    final ImagePicker picker = ImagePicker();
-    String? imagePath;
-    String? videoPath;
     String text = '';
+    final currentTime = DateTime.now();
+    final timeTitle = DateFormat('MM月dd日 HH:mm').format(currentTime);
 
-    await showModalBottomSheet(
+    await showGeneralDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (BuildContext context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  decoration: const InputDecoration(
-                    hintText: '写下此刻的想法...',
-                    border: OutlineInputBorder(),
+      barrierDismissible: true,
+      barrierLabel: '关闭',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.0, 0.0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+          )),
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    const BorderRadius.horizontal(left: Radius.circular(20)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(-2, 0),
                   ),
-                  maxLines: 3,
-                  onChanged: (value) => text = value,
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                ],
+              ),
+              child: SafeArea(
+                child: Column(
                   children: [
-                    SizedBox(
-                      width: 100,
-                      child: PopupMenuButton<ImageSource>(
-                        onSelected: (ImageSource source) async {
-                          final XFile? photo = await picker.pickImage(
-                            source: source,
-                            imageQuality: 100,
-                            preferredCameraDevice: CameraDevice.rear,
-                          );
-                          if (photo != null) {
-                            imagePath = await _copyImageToLocal(photo.path);
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: ImageSource.camera,
-                            child: Row(
-                              children: [
-                                Icon(Icons.camera_alt),
-                                SizedBox(width: 10),
-                                Text('拍照'),
-                              ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            offset: const Offset(0, 1),
+                            blurRadius: 3,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              FocusScope.of(context).unfocus();
+                              Navigator.pop(context);
+                            },
+                            color: Colors.grey[700],
+                          ),
+                          const Expanded(
+                            child: Text(
+                              '写日记',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
-                          const PopupMenuItem(
-                            value: ImageSource.gallery,
-                            child: Row(
-                              children: [
-                                Icon(Icons.photo_library),
-                                SizedBox(width: 10),
-                                Text('从相册选择'),
-                              ],
+                          TextButton(
+                            onPressed: () {
+                              if (text.isNotEmpty) {
+                                FocusScope.of(context).unfocus();
+                                Navigator.pop(context);
+                                setState(() {
+                                  _logs.add(LogEntry(
+                                    text: '[$timeTitle]\n$text',
+                                    timestamp: currentTime,
+                                  ));
+                                });
+                                _saveLogs();
+                              }
+                            },
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.blue,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            child: const Text(
+                              '保存',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
-                        child: ElevatedButton.icon(
-                          onPressed: null,
-                          icon: const Icon(Icons.add_photo_alternate),
-                          label: const Text('添加图片'),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(40),
-                          ),
-                        ),
                       ),
                     ),
-                    SizedBox(
-                      width: 100,
-                      child: PopupMenuButton<ImageSource>(
-                        onSelected: (ImageSource source) async {
-                          final XFile? video = await picker.pickVideo(
-                            source: source,
-                            maxDuration: const Duration(minutes: 10),
-                            preferredCameraDevice: CameraDevice.rear,
-                          );
-                          if (video != null) {
-                            videoPath = await _copyVideoToLocal(video.path);
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: ImageSource.camera,
-                            child: Row(
-                              children: [
-                                Icon(Icons.videocam),
-                                SizedBox(width: 10),
-                                Text('录制视频'),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: ImageSource.gallery,
-                            child: Row(
-                              children: [
-                                Icon(Icons.video_library),
-                                SizedBox(width: 10),
-                                Text('从相册选择'),
-                              ],
-                            ),
-                          ),
-                        ],
-                        child: ElevatedButton.icon(
-                          onPressed: null,
-                          icon: const Icon(Icons.video_library),
-                          label: const Text('添加视频'),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(40),
-                          ),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 16,
                         ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 100,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          if (text.isNotEmpty ||
-                              imagePath != null ||
-                              videoPath != null) {
-                            setState(() {
-                              _logs.add(LogEntry(
-                                text: text,
-                                imagePath: imagePath,
-                                videoPath: videoPath,
-                                timestamp: DateTime.now(),
-                              ));
-                            });
-                            await _saveLogs();
-                            Navigator.pop(context);
-                          }
-                        },
-                        icon: const Icon(Icons.check),
-                        label: const Text('完成'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(40),
+                        color: Colors.grey[50],
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.03),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 显示当前时间
+                                  Text(
+                                    timeTitle,
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue.shade700,
+                                    ),
+                                  ),
+                                  const Divider(height: 20),
+                                  TextField(
+                                    decoration: const InputDecoration(
+                                      hintText: '写下此刻的想法...',
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 16,
+                                      ),
+                                      border: InputBorder.none,
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                    maxLines: null,
+                                    autofocus: true,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      height: 1.5,
+                                      color: Colors.black87,
+                                    ),
+                                    onChanged: (value) => text = value,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.95,
+            child: child,
           ),
         );
       },
@@ -1150,24 +1253,243 @@ class _LogListPageState extends State<LogListPage> {
     }
   }
 
-  Future<void> _addLogWithLocation({
-    required String text,
-    String? imagePath,
-    String? videoPath,
-  }) async {
-    final position = await _getCurrentLocation();
-    setState(() {
-      _logs.add(LogEntry(
-        text: text,
-        imagePath: imagePath,
-        videoPath: videoPath,
-        timestamp: DateTime.now(),
-        latitude: position?.latitude,
-        longitude: position?.longitude,
-      ));
-    });
-    await _saveLogs();
+  Future<String?> _copyAudioToLocal(String sourcePath) async {
+    if (_customStoragePath == null) return null;
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final targetPath = path.join(_customStoragePath!, 'audios', fileName);
+
+    final directory = Directory(path.dirname(targetPath));
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+
+    await File(sourcePath).copy(targetPath);
+    return targetPath;
   }
+
+  Future<void> _initRecorder() async {
+    await _recorder.openRecorder();
+    await _player.openPlayer();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = path.join(
+          tempDir.path, '${DateTime.now().millisecondsSinceEpoch}.aac');
+
+      await _recorder.startRecorder(
+        toFile: tempPath,
+        codec: Codec.aacADTS,
+      );
+
+      setState(() {
+        _isRecording = true;
+      });
+    } catch (e) {
+      print('Error starting recording: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _recorder.stopRecorder();
+      setState(() => _isRecording = false);
+
+      if (path != null) {
+        final audioPath = await _copyAudioToLocal(path);
+        if (audioPath != null) {
+          String text = '';
+          await showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            builder: (BuildContext context) {
+              return StatefulBuilder(
+                builder: (context, setState) {
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            decoration: const InputDecoration(
+                              hintText: '为这段录音添加描述...',
+                              border: OutlineInputBorder(
+                                borderRadius:
+                                    BorderRadius.all(Radius.circular(16)),
+                              ),
+                            ),
+                            maxLines: 3,
+                            onChanged: (value) => text = value,
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () async {
+                                    if (_isPlayingPreview) {
+                                      await _player.stopPlayer();
+                                      setState(() => _isPlayingPreview = false);
+                                    } else {
+                                      await _player.startPlayer(
+                                        fromURI: audioPath,
+                                        whenFinished: () {
+                                          setState(
+                                              () => _isPlayingPreview = false);
+                                        },
+                                      );
+                                      setState(() => _isPlayingPreview = true);
+                                    }
+                                  },
+                                  icon: Icon(
+                                    _isPlayingPreview
+                                        ? Icons.stop
+                                        : Icons.play_arrow,
+                                    color: Colors.purple.shade400,
+                                  ),
+                                  label: Text(
+                                    _isPlayingPreview ? '停止' : '试听',
+                                    style: TextStyle(
+                                      color: Colors.purple.shade700,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.purple.shade50,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 24,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    if (_isPlayingPreview) {
+                                      _player.stopPlayer();
+                                    }
+                                    Navigator.pop(context);
+                                    setState(() {
+                                      _logs.add(LogEntry(
+                                        text: text,
+                                        audioPath: audioPath,
+                                        timestamp: DateTime.now(),
+                                      ));
+                                    });
+                                    _saveLogs();
+                                  },
+                                  icon: const Icon(Icons.save),
+                                  label: const Text('保存'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 24,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        }
+      }
+    } catch (e) {
+      print('Error stopping recording: $e');
+    }
+  }
+
+  List<DateTime> _getUniqueDates() {
+    final dates = _logs
+        .map((log) => DateTime(
+              log.timestamp.year,
+              log.timestamp.month,
+              log.timestamp.day,
+            ))
+        .toSet()
+        .toList();
+
+    dates.sort((a, b) => b.compareTo(a)); // 按日期降序排序
+    return dates;
+  }
+
+  int _getLogCountForDate(DateTime date) {
+    return _logs.where((log) {
+      final logDate = DateTime(
+        log.timestamp.year,
+        log.timestamp.month,
+        log.timestamp.day,
+      );
+      return logDate.isAtSameMomentAs(date);
+    }).length;
+  }
+}
+
+class LogEntry {
+  final String text;
+  final String? imagePath;
+  final String? videoPath;
+  final String? audioPath;
+  final DateTime timestamp;
+  final double? latitude;
+  final double? longitude;
+  final String? address;
+
+  LogEntry({
+    required this.text,
+    this.imagePath,
+    this.videoPath,
+    this.audioPath,
+    required this.timestamp,
+    this.latitude,
+    this.longitude,
+    this.address,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'imagePath': imagePath != null ? path.basename(imagePath!) : null,
+        'videoPath': videoPath != null ? path.basename(videoPath!) : null,
+        'audioPath': audioPath != null ? path.basename(audioPath!) : null,
+        'timestamp': timestamp.toIso8601String(),
+        'latitude': latitude,
+        'longitude': longitude,
+        'address': address,
+      };
+
+  factory LogEntry.fromJson(Map<String, dynamic> json) => LogEntry(
+        text: json['text'] as String,
+        imagePath:
+            json['imagePath'] != null ? json['imagePath'] as String : null,
+        videoPath:
+            json['videoPath'] != null ? json['videoPath'] as String : null,
+        audioPath:
+            json['audioPath'] != null ? json['audioPath'] as String : null,
+        timestamp: DateTime.parse(json['timestamp'] as String),
+        latitude: json['latitude'] as double?,
+        longitude: json['longitude'] as double?,
+        address: json['address'] as String?,
+      );
 }
 
 class TimelineEntry extends StatefulWidget {
@@ -1282,7 +1604,7 @@ class _TimelineEntryState extends State<TimelineEntry> {
     return Row(
       children: [
         Container(
-          width: 60,
+          width: 80,
           margin: const EdgeInsets.only(left: 8),
           child: Stack(
             children: [
@@ -1293,21 +1615,39 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         : 140, // 只有文本时的高度
                 child: Stack(
                   children: [
+                    // 时间线竖线
                     Positioned(
                       top: 0,
                       bottom: 0,
-                      left: 29,
+                      left: 39,
                       child: Container(
                         width: 2,
-                        color: Colors.blue,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.blue.shade300,
+                              Colors.blue.shade400,
+                            ],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.2),
+                              blurRadius: 3,
+                              offset: const Offset(1, 0),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+                    // 时间点圆圈
                     Positioned(
                       top: widget.log.imagePath != null ||
                               widget.log.videoPath != null
                           ? 90 // 有图片或视频时圆点的位置
                           : 45, // 只有文本时圆点的位置
-                      left: 5,
+                      left: 15,
                       child: Container(
                         width: 50,
                         height: 50,
@@ -1315,47 +1655,79 @@ class _TimelineEntryState extends State<TimelineEntry> {
                           color: Colors.white,
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: Colors.blue,
-                            width: 2,
+                            color: Colors.blue.shade400,
+                            width: 2.5,
                           ),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.blue.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(2, 2),
+                            ),
+                            BoxShadow(
+                              color: Colors.white,
                               blurRadius: 4,
-                              offset: const Offset(0, 2),
+                              offset: const Offset(-2, -2),
                             ),
                           ],
                         ),
-                        child: Center(
-                          child: Text(
-                            _getTimePeriod(widget.log.timestamp),
-                            style: TextStyle(
-                              color: Colors.blue[700],
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
+                        child: Container(
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              _getTimePeriod(widget.log.timestamp),
+                              style: TextStyle(
+                                color: Colors.blue.shade700,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
+                    // 顶部连接线
                     if (widget.isFirst)
-                      const Positioned(
+                      Positioned(
                         top: 0,
-                        left: 29,
-                        child: SizedBox(
+                        left: 39,
+                        child: Container(
                           width: 2,
                           height: 50,
-                          child: ColoredBox(color: Colors.white),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.white,
+                                Colors.blue.shade300,
+                              ],
+                            ),
+                          ),
                         ),
                       ),
+                    // 底部连接线
                     if (widget.isLast)
                       Positioned(
                         bottom: 0,
-                        left: 29,
-                        child: SizedBox(
+                        left: 39,
+                        child: Container(
                           width: 2,
                           height: 50,
-                          child: ColoredBox(color: Colors.white),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.blue.shade400,
+                                Colors.white,
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                   ],
@@ -1463,8 +1835,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         ),
                       );
                     }
-                  } catch (error) {
-                    print('Error getting full image path: $error');
+                  } catch (e) {
+                    print('Error getting full image path: $e');
                   }
                 } else if (widget.log.videoPath != null) {
                   final logListState =
@@ -1491,8 +1863,28 @@ class _TimelineEntryState extends State<TimelineEntry> {
                         ),
                       );
                     }
-                  } catch (error) {
-                    print('Error getting full video path: $error');
+                  } catch (e) {
+                    print('Error getting full video path: $e');
+                  }
+                } else if (widget.log.audioPath != null) {
+                  final logListState =
+                      context.findAncestorStateOfType<_LogListPageState>();
+                  if (logListState == null) {
+                    print('Error: Could not find _LogListPageState');
+                    return;
+                  }
+
+                  if (context.mounted) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AudioPreviewPage(
+                          audioPath: widget.log.audioPath!,
+                          timestamp: widget.log.timestamp,
+                          text: widget.log.text,
+                        ),
+                      ),
+                    );
                   }
                 }
               },
@@ -1629,11 +2021,74 @@ class _TimelineEntryState extends State<TimelineEntry> {
                               ),
                             ],
                           ),
+                        )
+                      else if (widget.log.audioPath != null)
+                        Container(
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(16),
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              Center(
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.mic,
+                                      color: Colors.purple.shade300,
+                                      size: 32,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '语音记录',
+                                      style: TextStyle(
+                                        color: Colors.purple.shade300,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        Colors.black.withOpacity(0.1),
+                                      ],
+                                    ),
+                                  ),
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(
+                                    DateFormat('MM月dd日 HH:mm')
+                                        .format(widget.log.timestamp),
+                                    style: TextStyle(
+                                      color: Colors.purple.shade700,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ClipRRect(
                         borderRadius: BorderRadius.vertical(
                           top: widget.log.imagePath == null &&
-                                  widget.log.videoPath == null
+                                  widget.log.videoPath == null &&
+                                  widget.log.audioPath == null
                               ? const Radius.circular(16)
                               : Radius.zero,
                           bottom: const Radius.circular(16),
@@ -1787,48 +2242,6 @@ class _TimelineEntryState extends State<TimelineEntry> {
       return '凌晨';
     }
   }
-}
-
-class LogEntry {
-  final String text;
-  final String? imagePath;
-  final String? videoPath;
-  final DateTime timestamp;
-  final double? latitude;
-  final double? longitude;
-  final String? address;
-
-  LogEntry({
-    required this.text,
-    this.imagePath,
-    this.videoPath,
-    required this.timestamp,
-    this.latitude,
-    this.longitude,
-    this.address,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'text': text,
-        'imagePath': imagePath != null ? path.basename(imagePath!) : null,
-        'videoPath': videoPath != null ? path.basename(videoPath!) : null,
-        'timestamp': timestamp.toIso8601String(),
-        'latitude': latitude,
-        'longitude': longitude,
-        'address': address,
-      };
-
-  factory LogEntry.fromJson(Map<String, dynamic> json) => LogEntry(
-        text: json['text'] as String,
-        imagePath:
-            json['imagePath'] != null ? json['imagePath'] as String : null,
-        videoPath:
-            json['videoPath'] != null ? json['videoPath'] as String : null,
-        timestamp: DateTime.parse(json['timestamp'] as String),
-        latitude: json['latitude'] as double?,
-        longitude: json['longitude'] as double?,
-        address: json['address'] as String?,
-      );
 }
 
 class ImagePreviewPage extends StatelessWidget {
@@ -1993,5 +2406,423 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
         ],
       ),
     );
+  }
+}
+
+class AudioPreviewPage extends StatefulWidget {
+  final String audioPath;
+  final DateTime timestamp;
+  final String text;
+
+  const AudioPreviewPage({
+    super.key,
+    required this.audioPath,
+    required this.timestamp,
+    required this.text,
+  });
+
+  @override
+  State<AudioPreviewPage> createState() => _AudioPreviewPageState();
+}
+
+class _AudioPreviewPageState extends State<AudioPreviewPage> {
+  final FlutterSoundPlayer _player = FlutterSoundPlayer();
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  StreamSubscription? _playerSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    await _player.openPlayer();
+    // 设置进度更新间隔为100毫秒
+    await _player.setSubscriptionDuration(const Duration(milliseconds: 100));
+
+    // 监听播放进度
+    _playerSubscription = _player.onProgress!.listen((event) {
+      setState(() {
+        _position = event.position;
+        _duration = event.duration;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _playerSubscription?.cancel();
+    _player.closePlayer();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _player.stopPlayer();
+      setState(() {
+        _isPlaying = false;
+        _position = Duration.zero;
+      });
+    } else {
+      await _player.startPlayer(
+        fromURI: widget.audioPath,
+        whenFinished: () => setState(() {
+          _isPlaying = false;
+          _position = Duration.zero;
+        }),
+      );
+      setState(() => _isPlaying = true);
+    }
+  }
+
+  Future<void> _seekTo(Duration position) async {
+    await _player.seekToPlayer(position);
+    setState(() {
+      _position = position;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[100],
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              DateFormat('yyyy年MM月dd日').format(widget.timestamp),
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              DateFormat('HH:mm').format(widget.timestamp),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          const SizedBox(height: 32),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.purple.shade50,
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      _isPlaying ? Icons.stop : Icons.play_arrow,
+                      size: 40,
+                      color: Colors.purple.shade400,
+                    ),
+                    onPressed: _togglePlay,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // 添加进度条
+                Column(
+                  children: [
+                    SliderTheme(
+                      data: SliderThemeData(
+                        trackHeight: 4,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 6,
+                        ),
+                        overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 14,
+                        ),
+                        activeTrackColor: Colors.purple.shade300,
+                        inactiveTrackColor: Colors.purple.shade50,
+                        thumbColor: Colors.purple.shade400,
+                        overlayColor: Colors.purple.shade100,
+                      ),
+                      child: Slider(
+                        value: _position.inMilliseconds.toDouble(),
+                        max: _duration.inMilliseconds > 0
+                            ? _duration.inMilliseconds.toDouble()
+                            : 1.0, // 避免除以零错误
+                        onChanged: (value) {
+                          final position =
+                              Duration(milliseconds: value.toInt());
+                          _seekTo(position);
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _formatDuration(_position),
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                          Text(
+                            _formatDuration(_duration),
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if (widget.text.isNotEmpty)
+                  Text(
+                    widget.text,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    String minutes = twoDigits(duration.inMinutes.remainder(60));
+    String seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
+  }
+}
+
+class DateListDialog extends StatefulWidget {
+  final List<DateTime> dates;
+  final Function(DateTime) onSelectDate;
+  final int Function(DateTime) getLogCount;
+
+  const DateListDialog({
+    super.key,
+    required this.dates,
+    required this.onSelectDate,
+    required this.getLogCount,
+  });
+
+  @override
+  State<DateListDialog> createState() => _DateListDialogState();
+}
+
+class _DateListDialogState extends State<DateListDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // 按月份对日期进行分组
+  Map<String, List<DateTime>> _getGroupedDates() {
+    final Map<String, List<DateTime>> grouped = {};
+
+    for (var date in widget.dates) {
+      if (_searchQuery.isNotEmpty) {
+        final dateStr = DateFormat('yyyy年MM月dd日').format(date);
+        if (!dateStr.contains(_searchQuery)) {
+          continue;
+        }
+      }
+
+      final monthKey = DateFormat('yyyy年MM月').format(date);
+      grouped.putIfAbsent(monthKey, () => []).add(date);
+    }
+
+    return grouped;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final groupedDates = _getGroupedDates();
+    final months = groupedDates.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 600),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Text(
+                  '所有日期',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索日期...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: groupedDates.isEmpty
+                ? Center(
+                    child: Text(
+                      '没有找到匹配的日期',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 16,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: months.length,
+                    itemBuilder: (context, monthIndex) {
+                      final month = months[monthIndex];
+                      final dates = groupedDates[month]!;
+
+                      return ExpansionTile(
+                        initiallyExpanded: _searchQuery.isNotEmpty,
+                        title: Row(
+                          children: [
+                            Text(
+                              month,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${dates.length}天',
+                                style: TextStyle(
+                                  color: Colors.blue.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        children: dates.map((date) {
+                          final count = widget.getLogCount(date);
+                          return ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${date.day}',
+                                style: TextStyle(
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              DateFormat('dd日 EEEE').format(date),
+                              style: const TextStyle(fontSize: 15),
+                            ),
+                            trailing: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '$count条',
+                                style: TextStyle(
+                                  color: Colors.grey.shade700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            onTap: () => widget.onSelectDate(date),
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 }
