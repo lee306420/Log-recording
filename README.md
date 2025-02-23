@@ -3,7 +3,8 @@
 
 软件运行截图：
 
-![Untitled](https://github.com/user-attachments/assets/68e57a68-fd87-4de6-b4ec-93481615367d)
+![9791740327627_ pic_hd](https://github.com/user-attachments/assets/32cf5673-9914-45bc-9208-6edf94cbdf55)
+
 
 
 
