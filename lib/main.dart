@@ -82,7 +82,10 @@ class _LogListPageState extends State<LogListPage> {
   }
 
   List<LogEntry> get _filteredLogs {
-    List<LogEntry> logs = _logs;
+    List<LogEntry> logs = List.from(_logs); // 创建一个新的列表以避免修改原始列表
+
+    // 首先按时间戳降序排序（最新的在前）
+    logs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     if (_searchQuery.isNotEmpty) {
       logs = logs.where((log) {
@@ -283,19 +286,19 @@ class _LogListPageState extends State<LogListPage> {
           ),
         ),
       ),
-      body: _isSearchingAllDates && _searchQuery.isEmpty
+      body: _filteredLogs.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    Icons.search,
+                    Icons.search_off,
                     size: 64,
                     color: Colors.grey[400],
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '请输入搜索内容',
+                    _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
                     style: TextStyle(
                       fontSize: 16,
                       color: Colors.grey[600],
@@ -304,44 +307,23 @@ class _LogListPageState extends State<LogListPage> {
                 ],
               ),
             )
-          : _filteredLogs.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.search_off,
-                        size: 64,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
+          : ListView.builder(
+              itemCount: _filteredLogs.length,
+              itemBuilder: (context, index) {
+                final log = _filteredLogs[index];
+                return TimelineEntry(
+                  log: log,
+                  isFirst: index == 0,
+                  isLast: index == _filteredLogs.length - 1,
+                  onEdit: () => _editLog(
+                    context,
+                    _logs.indexOf(log),
+                    log,
                   ),
-                )
-              : ListView.builder(
-                  itemCount: _filteredLogs.length,
-                  itemBuilder: (context, index) {
-                    final log = _filteredLogs[index];
-                    return TimelineEntry(
-                      log: log,
-                      isFirst: index == 0,
-                      isLast: index == _filteredLogs.length - 1,
-                      onEdit: () => _editLog(
-                        context,
-                        _logs.indexOf(log),
-                        log,
-                      ),
-                      onDelete: () => _deleteLog(_logs.indexOf(log)),
-                    );
-                  },
-                ),
+                  onDelete: () => _deleteLog(_logs.indexOf(log)),
+                );
+              },
+            ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Column(
