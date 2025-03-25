@@ -15,6 +15,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   runApp(const MyApp());
@@ -336,6 +337,445 @@ class _LogListPageState extends State<LogListPage> {
                 await _addNewLog(context);
               },
               child: const Icon(Icons.edit_note),
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'galleryPicker',
+              onPressed: () async {
+                final ImagePicker picker = ImagePicker();
+
+                // 选择照片或视频
+                final XFile? media = await showModalBottomSheet<XFile?>(
+                  context: context,
+                  builder: (BuildContext context) {
+                    return SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.photo),
+                            title: const Text('选择照片'),
+                            onTap: () async {
+                              Navigator.pop(
+                                  context,
+                                  await picker.pickImage(
+                                    source: ImageSource.gallery,
+                                  ));
+                            },
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.videocam),
+                            title: const Text('选择视频'),
+                            subtitle: const Text('视频时长限制: 30秒'),
+                            onTap: () async {
+                              Navigator.pop(
+                                  context,
+                                  await picker.pickVideo(
+                                    source: ImageSource.gallery,
+                                    maxDuration: const Duration(seconds: 30),
+                                  ));
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+
+                if (media != null) {
+                  // 判断是图片还是视频
+                  final String extension =
+                      media.path.split('.').last.toLowerCase();
+                  final bool isVideo =
+                      ['mp4', 'mov', 'avi', '3gp', 'mkv'].contains(extension);
+
+                  if (isVideo) {
+                    // 处理视频
+                    final File videoFile = File(media.path);
+                    final int fileSize = await videoFile.length();
+                    final double fileSizeInMB = fileSize / (1024 * 1024);
+
+                    // 检查视频时长
+                    final videoPlayerController =
+                        VideoPlayerController.file(videoFile);
+                    try {
+                      await videoPlayerController.initialize();
+                      final Duration videoDuration =
+                          videoPlayerController.value.duration;
+
+                      // 关闭controller
+                      await videoPlayerController.dispose();
+
+                      // 检查视频是否超过30秒
+                      if (videoDuration.inSeconds > 30) {
+                        if (context.mounted) {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('视频过长'),
+                              content: const Text('选择的视频超过30秒，请选择更短的视频。'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('确定'),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                    } catch (e) {
+                      debugPrint('视频加载失败: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('无法读取视频信息，请选择其他视频')),
+                        );
+                      }
+                      return;
+                    }
+
+                    if (fileSizeInMB > 500) {
+                      if (context.mounted) {
+                        final bool shouldContinue = await showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('文件过大'),
+                                content: Text(
+                                    '选择的视频文件大小为 ${fileSizeInMB.toStringAsFixed(2)}MB，建议选择较小的视频以获得更好的性能。是否继续？'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
+                                    child: const Text('取消'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
+                                    child: const Text('继续'),
+                                  ),
+                                ],
+                              ),
+                            ) ??
+                            false;
+                        if (!shouldContinue) return;
+                      }
+                    }
+
+                    final videoPath = await _copyVideoToLocal(media.path);
+                    if (videoPath != null && context.mounted) {
+                      String text = '';
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (BuildContext context) {
+                          return Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(20)),
+                            ),
+                            padding: EdgeInsets.only(
+                              bottom: MediaQuery.of(context).viewInsets.bottom,
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade300,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  child: Row(
+                                    children: [
+                                      const Text(
+                                        '添加描述',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: Text(
+                                          '取消',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Divider(height: 1),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade50,
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: Colors.grey.shade200,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: TextField(
+                                          decoration: InputDecoration(
+                                            hintText: '为这段视频添加描述...',
+                                            hintStyle: TextStyle(
+                                              color: Colors.grey.shade400,
+                                              fontSize: 16,
+                                            ),
+                                            border: InputBorder.none,
+                                            contentPadding:
+                                                const EdgeInsets.all(16),
+                                          ),
+                                          maxLines: null,
+                                          minLines: 3,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            height: 1.5,
+                                            color: Colors.black87,
+                                          ),
+                                          onChanged: (value) => text = value,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: ValueListenableBuilder<String>(
+                                          valueListenable:
+                                              ValueNotifier<String>(text),
+                                          builder: (context, value, child) {
+                                            return Text(
+                                              '${text.length} 字',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade500,
+                                                fontSize: 14,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(height: 24),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            setState(() {
+                                              _logs.add(LogEntry(
+                                                text: text,
+                                                videoPath: videoPath,
+                                                timestamp: DateTime.now(),
+                                              ));
+                                            });
+                                            _saveLogs();
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.blue,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            '保存',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  } else {
+                    // 处理图片
+                    final imagePath = await _copyImageToLocal(media.path);
+                    if (imagePath != null && context.mounted) {
+                      String text = '';
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (BuildContext context) {
+                          return Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(20)),
+                            ),
+                            padding: EdgeInsets.only(
+                              bottom: MediaQuery.of(context).viewInsets.bottom,
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade300,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  child: Row(
+                                    children: [
+                                      const Text(
+                                        '添加描述',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: Text(
+                                          '取消',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Divider(height: 1),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade50,
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: Colors.grey.shade200,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: TextField(
+                                          decoration: InputDecoration(
+                                            hintText: '为这张照片添加描述...',
+                                            hintStyle: TextStyle(
+                                              color: Colors.grey.shade400,
+                                              fontSize: 16,
+                                            ),
+                                            border: InputBorder.none,
+                                            contentPadding:
+                                                const EdgeInsets.all(16),
+                                          ),
+                                          maxLines: null,
+                                          minLines: 3,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            height: 1.5,
+                                            color: Colors.black87,
+                                          ),
+                                          onChanged: (value) => text = value,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: ValueListenableBuilder<String>(
+                                          valueListenable:
+                                              ValueNotifier<String>(text),
+                                          builder: (context, value, child) {
+                                            return Text(
+                                              '${text.length} 字',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade500,
+                                                fontSize: 14,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(height: 24),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            setState(() {
+                                              _logs.add(LogEntry(
+                                                text: text,
+                                                imagePath: imagePath,
+                                                timestamp: DateTime.now(),
+                                              ));
+                                            });
+                                            _saveLogs();
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.blue,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          child: const Text(
+                                            '保存',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  }
+                }
+              },
+              child: const Icon(Icons.photo_library),
             ),
             const SizedBox(height: 16),
             FloatingActionButton(
@@ -2436,6 +2876,33 @@ class ImagePreviewPage extends StatelessWidget {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () async {
+              try {
+                // 获取文件的XFile
+                final xFile = XFile(imagePath);
+
+                // 创建分享文本，如果有描述则包含描述
+                final String shareText = text.isNotEmpty
+                    ? '分享于 ${DateFormat('yyyy年MM月dd日 HH:mm').format(timestamp)}\n$text'
+                    : '分享于 ${DateFormat('yyyy年MM月dd日 HH:mm').format(timestamp)}';
+
+                // 分享图片和文本
+                await Share.shareXFiles(
+                  [xFile],
+                  text: shareText,
+                  subject: '照片分享',
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('分享失败: $e')),
+                );
+              }
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -2713,18 +3180,44 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              DateFormat('yyyy-MM-dd HH:mm:ss').format(widget.timestamp),
-              style: const TextStyle(fontSize: 14),
+              DateFormat('yyyy年MM月dd日').format(widget.timestamp),
+              style: const TextStyle(fontSize: 16),
             ),
-            if (widget.text.isNotEmpty)
-              Text(
-                widget.text,
-                style: const TextStyle(fontSize: 12),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            Text(
+              DateFormat('HH:mm').format(widget.timestamp),
+              style: const TextStyle(fontSize: 12),
+            ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () async {
+              try {
+                // 获取文件的XFile
+                final xFile = XFile(widget.videoPath);
+
+                // 创建分享文本，如果有描述则包含描述
+                final String shareText = widget.text.isNotEmpty
+                    ? '分享于 ${DateFormat('yyyy年MM月dd日 HH:mm').format(widget.timestamp)}\n${widget.text}'
+                    : '分享于 ${DateFormat('yyyy年MM月dd日 HH:mm').format(widget.timestamp)}';
+
+                // 分享视频和文本
+                await Share.shareXFiles(
+                  [xFile],
+                  text: shareText,
+                  subject: '视频分享',
+                );
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('分享失败: $e')),
+                  );
+                }
+              }
+            },
+          ),
+        ],
       ),
       body: Center(
         child: _isLoading
