@@ -56,15 +56,22 @@ class LogListPage extends StatefulWidget {
 class _LogListPageState extends State<LogListPage> {
   final List<LogEntry> _logs = [];
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
   DateTime? _selectedDate;
   String? _customStoragePath;
   bool _isSearchingAllDates = false;
+  final ScrollController _scrollController = ScrollController();
+  static const int _pageSize = 10;
+  int _currentPage = 1;
+  bool _isLoadingMore = false;
 
   @override
   void initState() {
     super.initState();
     _selectedDate = DateTime.now();
+    _scrollController.addListener(_onScroll);
+    _searchFocusNode.addListener(_onSearchFocusChange);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _requestAllFilePermissions();
@@ -79,13 +86,44 @@ class _LogListPageState extends State<LogListPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  List<LogEntry> get _filteredLogs {
-    List<LogEntry> logs = List.from(_logs); // 创建一个新的列表以避免修改原始列表
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMoreLogs();
+    }
+  }
 
-    // 首先按时间戳降序排序（最新的在前）
+  Future<void> _loadMoreLogs() async {
+    if (_isLoadingMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    // 模拟加载延迟
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    final startIndex = _currentPage * _pageSize;
+    final endIndex = (startIndex + _pageSize).clamp(0, _filteredLogs.length);
+
+    if (startIndex < _filteredLogs.length) {
+      setState(() {
+        _currentPage++;
+      });
+    }
+
+    setState(() {
+      _isLoadingMore = false;
+    });
+  }
+
+  List<LogEntry> get _filteredLogs {
+    List<LogEntry> logs = List.from(_logs);
     logs.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     if (_searchQuery.isNotEmpty) {
@@ -113,6 +151,11 @@ class _LogListPageState extends State<LogListPage> {
     }
 
     return logs;
+  }
+
+  List<LogEntry> get _paginatedLogs {
+    final endIndex = (_currentPage * _pageSize).clamp(0, _filteredLogs.length);
+    return _filteredLogs.sublist(0, endIndex);
   }
 
   @override
@@ -210,121 +253,66 @@ class _LogListPageState extends State<LogListPage> {
           preferredSize: const Size.fromHeight(56.0),
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: _isSearchingAllDates
-                              ? '搜索全部日志...'
-                              : '搜索当前日期的日志...',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchController.clear();
-                                      _searchQuery = '';
-                                    });
-                                  },
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value;
-                          });
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color:
-                            _isSearchingAllDates ? Colors.blue : Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: Colors.blue,
-                          width: 1,
-                        ),
-                      ),
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.all_inclusive,
-                          color:
-                              _isSearchingAllDates ? Colors.white : Colors.blue,
-                        ),
-                        tooltip: _isSearchingAllDates ? '仅搜索当前日期' : '搜索全部日期',
-                        onPressed: () {
-                          setState(() {
-                            _isSearchingAllDates = !_isSearchingAllDates;
-                            if (!_isSearchingAllDates) {
-                              _searchController.clear();
-                              _searchQuery = '';
-                            }
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildSearchBar(),
             ],
           ),
         ),
       ),
-      body: _filteredLogs.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.search_off,
-                    size: 64,
-                    color: Colors.grey[400],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
+      body: GestureDetector(
+        onTap: () {
+          // 点击空白区域时，让搜索框失去焦点
+          _searchFocusNode.unfocus();
+        },
+        child: _filteredLogs.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.search_off,
+                      size: 64,
+                      color: Colors.grey[400],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    Text(
+                      _logs.isEmpty ? '还没有日志记录' : '没有找到相关日志',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                controller: _scrollController,
+                itemCount: _paginatedLogs.length + (_isLoadingMore ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index == _paginatedLogs.length) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+
+                  final log = _paginatedLogs[index];
+                  return TimelineEntry(
+                    key: ValueKey(log.timestamp.toString()),
+                    log: log,
+                    isFirst: index == 0,
+                    isLast: index == _paginatedLogs.length - 1,
+                    onEdit: () => _editLog(
+                      context,
+                      _logs.indexOf(log),
+                      log,
+                    ),
+                    onDelete: () => _deleteLog(_logs.indexOf(log)),
+                  );
+                },
               ),
-            )
-          : ListView.builder(
-              itemCount: _filteredLogs.length,
-              itemBuilder: (context, index) {
-                final log = _filteredLogs[index];
-                return TimelineEntry(
-                  log: log,
-                  isFirst: index == 0,
-                  isLast: index == _filteredLogs.length - 1,
-                  onEdit: () => _editLog(
-                    context,
-                    _logs.indexOf(log),
-                    log,
-                  ),
-                  onDelete: () => _deleteLog(_logs.indexOf(log)),
-                );
-              },
-            ),
+      ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Column(
@@ -536,6 +524,7 @@ class _LogListPageState extends State<LogListPage> {
                                           ),
                                         ),
                                         child: TextField(
+                                          autofocus: false, // 添加此行，防止键盘自动弹出
                                           decoration: InputDecoration(
                                             hintText: '为这段视频添加描述...',
                                             hintStyle: TextStyle(
@@ -692,6 +681,7 @@ class _LogListPageState extends State<LogListPage> {
                                           ),
                                         ),
                                         child: TextField(
+                                          autofocus: false, // 添加此行，防止键盘自动弹出
                                           decoration: InputDecoration(
                                             hintText: '为这张照片添加描述...',
                                             hintStyle: TextStyle(
@@ -888,6 +878,7 @@ class _LogListPageState extends State<LogListPage> {
                                         ),
                                       ),
                                       child: TextField(
+                                        autofocus: false, // 添加此行，防止键盘自动弹出
                                         decoration: InputDecoration(
                                           hintText: '为这段视频添加描述...',
                                           hintStyle: TextStyle(
@@ -1058,6 +1049,7 @@ class _LogListPageState extends State<LogListPage> {
                                         ),
                                       ),
                                       child: TextField(
+                                        autofocus: false, // 添加此行，防止键盘自动弹出
                                         decoration: InputDecoration(
                                           hintText: '为这张照片添加描述...',
                                           hintStyle: TextStyle(
@@ -2034,6 +2026,90 @@ class _LogListPageState extends State<LogListPage> {
       },
     );
   }
+
+  void _onSearchFocusChange() {
+    if (!_searchFocusNode.hasFocus) {
+      // 当搜索框失去焦点时，收起键盘
+      FocusScope.of(context).unfocus();
+    }
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              decoration: InputDecoration(
+                hintText: _isSearchingAllDates ? '搜索全部日志...' : '搜索当前日期的日志...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+              onSubmitted: (_) {
+                // 当用户按下回车键时，让搜索框失去焦点
+                _searchFocusNode.unfocus();
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: _isSearchingAllDates ? Colors.blue : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: Colors.blue,
+                width: 1,
+              ),
+            ),
+            child: IconButton(
+              icon: Icon(
+                Icons.all_inclusive,
+                color: _isSearchingAllDates ? Colors.white : Colors.blue,
+              ),
+              tooltip: _isSearchingAllDates ? '仅搜索当前日期' : '搜索全部日期',
+              onPressed: () {
+                setState(() {
+                  _isSearchingAllDates = !_isSearchingAllDates;
+                  if (!_isSearchingAllDates) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                  }
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class LogEntry {
@@ -2107,6 +2183,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
   static final Map<String, VideoPlayerController> _controllerCache = {};
+  static final Map<String, ImageProvider> _imageCache = {};
+  static const int _maxCachedControllers = 3;
 
   @override
   void initState() {
@@ -2114,16 +2192,33 @@ class _TimelineEntryState extends State<TimelineEntry> {
     if (widget.log.videoPath != null) {
       _initializeVideoController();
     }
+    if (widget.log.imagePath != null) {
+      _preloadImage();
+    }
   }
 
-  @override
-  void didUpdateWidget(TimelineEntry oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.log.videoPath != oldWidget.log.videoPath) {
-      _disposeController();
-      if (widget.log.videoPath != null) {
-        _initializeVideoController();
+  Future<void> _preloadImage() async {
+    if (widget.log.imagePath == null) return;
+
+    final logListState = context.findAncestorStateOfType<_LogListPageState>();
+    if (logListState == null) return;
+
+    try {
+      final fullPath =
+          await logListState.getFullImagePath(widget.log.imagePath!);
+      if (!_imageCache.containsKey(fullPath)) {
+        final file = File(fullPath);
+        if (await file.exists()) {
+          _imageCache[fullPath] = FileImage(file);
+          // 预加载图片
+          (_imageCache[fullPath] as FileImage).evict().then((_) {
+            (_imageCache[fullPath] as FileImage)
+                .resolve(ImageConfiguration.empty);
+          });
+        }
       }
+    } catch (e) {
+      debugPrint('Error preloading image: $e');
     }
   }
 
@@ -2170,6 +2265,13 @@ class _TimelineEntryState extends State<TimelineEntry> {
       // 缓存控制器
       _controllerCache[fullPath] = controller;
 
+      // 限制缓存数量
+      if (_controllerCache.length > _maxCachedControllers) {
+        final oldestKey = _controllerCache.keys.first;
+        final oldestController = _controllerCache.remove(oldestKey);
+        oldestController?.dispose();
+      }
+
       if (!mounted) {
         controller.dispose();
         return;
@@ -2178,13 +2280,6 @@ class _TimelineEntryState extends State<TimelineEntry> {
       _videoController = controller;
       _isVideoInitialized = true;
       setState(() {});
-
-      // 清理旧的缓存
-      if (_controllerCache.length > 5) {
-        final oldestKey = _controllerCache.keys.first;
-        final oldestController = _controllerCache.remove(oldestKey);
-        oldestController?.dispose();
-      }
     } catch (e) {
       debugPrint('Error initializing video controller: $e');
     }
@@ -2741,13 +2836,33 @@ class _TimelineEntryState extends State<TimelineEntry> {
             ),
           );
         }
+
+        final fullPath = snapshot.data!;
+        final imageProvider =
+            _imageCache[fullPath] ?? FileImage(File(fullPath));
+
         return Hero(
           tag: widget.log.imagePath!,
-          child: Image.file(
-            File(snapshot.data!),
+          child: Image(
+            image: imageProvider,
             height: 180,
             width: double.infinity,
             fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                height: 200,
+                color: Colors.grey[100],
+                child: Center(
+                  child: CircularProgressIndicator(
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded /
+                            loadingProgress.expectedTotalBytes!
+                        : null,
+                  ),
+                ),
+              );
+            },
             errorBuilder: (context, error, stackTrace) {
               return Container(
                 height: 200,
