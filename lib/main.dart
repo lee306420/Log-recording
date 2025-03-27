@@ -16,6 +16,7 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 void main() {
   runApp(const MyApp());
@@ -330,94 +331,58 @@ class _LogListPageState extends State<LogListPage> {
             FloatingActionButton(
               heroTag: 'galleryPicker',
               onPressed: () async {
-                final ImagePicker picker = ImagePicker();
-
-                // 选择照片或视频
-                final XFile? media = await showModalBottomSheet<XFile?>(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return SafeArea(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ListTile(
-                            leading: const Icon(Icons.photo),
-                            title: const Text('选择照片'),
-                            onTap: () async {
-                              Navigator.pop(
-                                  context,
-                                  await picker.pickImage(
-                                    source: ImageSource.gallery,
-                                  ));
-                            },
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.videocam),
-                            title: const Text('选择视频'),
-                            subtitle: const Text('视频时长限制: 30秒'),
-                            onTap: () async {
-                              Navigator.pop(
-                                  context,
-                                  await picker.pickVideo(
-                                    source: ImageSource.gallery,
-                                    maxDuration: const Duration(seconds: 30),
-                                  ));
-                            },
-                          ),
-                        ],
+                final List<AssetEntity>? result = await AssetPicker.pickAssets(
+                  context,
+                  pickerConfig: AssetPickerConfig(
+                    maxAssets: 1, // 单选模式
+                    requestType: RequestType.common, // 同时支持图片和视频
+                    limitedPermissionOverlayPredicate:
+                        (PermissionState state) => true, // 显示权限提示
+                    specialPickerType:
+                        SpecialPickerType.wechatMoment, // 使用朋友圈样式UI
+                    filterOptions: FilterOptionGroup(
+                      videoOption: FilterOption(
+                        durationConstraint: const DurationConstraint(
+                          max: Duration(seconds: 30), // 限制视频最大时长30秒
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 );
 
-                if (media != null) {
-                  // 判断是图片还是视频
-                  final String extension =
-                      media.path.split('.').last.toLowerCase();
-                  final bool isVideo =
-                      ['mp4', 'mov', 'avi', '3gp', 'mkv'].contains(extension);
+                if (result != null && result.isNotEmpty && context.mounted) {
+                  final AssetEntity asset = result.first;
 
-                  if (isVideo) {
+                  if (asset.type == AssetType.video) {
                     // 处理视频
-                    final File videoFile = File(media.path);
+                    final File? videoFile = await asset.file;
+                    if (videoFile == null) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('无法获取视频文件')),
+                        );
+                      }
+                      return;
+                    }
+
                     final int fileSize = await videoFile.length();
                     final double fileSizeInMB = fileSize / (1024 * 1024);
 
                     // 检查视频时长
-                    final videoPlayerController =
-                        VideoPlayerController.file(videoFile);
-                    try {
-                      await videoPlayerController.initialize();
-                      final Duration videoDuration =
-                          videoPlayerController.value.duration;
-
-                      // 关闭controller
-                      await videoPlayerController.dispose();
-
-                      // 检查视频是否超过30秒
-                      if (videoDuration.inSeconds > 30) {
-                        if (context.mounted) {
-                          showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('视频过长'),
-                              content: const Text('选择的视频超过30秒，请选择更短的视频。'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('确定'),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                        return;
-                      }
-                    } catch (e) {
-                      debugPrint('视频加载失败: $e');
+                    if (asset.duration > 30) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('无法读取视频信息，请选择其他视频')),
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('视频过长'),
+                            content: const Text('选择的视频超过30秒，请选择更短的视频。'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('确定'),
+                              ),
+                            ],
+                          ),
                         );
                       }
                       return;
@@ -450,7 +415,7 @@ class _LogListPageState extends State<LogListPage> {
                       }
                     }
 
-                    final videoPath = await _copyVideoToLocal(media.path);
+                    final videoPath = await _copyVideoToLocal(videoFile.path);
                     if (videoPath != null && context.mounted) {
                       String text = '';
                       await showModalBottomSheet(
@@ -605,9 +570,19 @@ class _LogListPageState extends State<LogListPage> {
                         },
                       );
                     }
-                  } else {
+                  } else if (asset.type == AssetType.image) {
                     // 处理图片
-                    final imagePath = await _copyImageToLocal(media.path);
+                    final File? imageFile = await asset.file;
+                    if (imageFile == null) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('无法获取图片文件')),
+                        );
+                      }
+                      return;
+                    }
+
+                    final imagePath = await _copyImageToLocal(imageFile.path);
                     if (imagePath != null && context.mounted) {
                       String text = '';
                       await showModalBottomSheet(
