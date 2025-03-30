@@ -829,6 +829,10 @@ class LogListPageState extends State<LogListPage> {
                   }
 
                   final log = _paginatedLogs[index];
+                  // 获取前一条日志的时间戳（因为日志是按时间倒序排列的，索引小的是较新的日志）
+                  final DateTime? previousTimestamp =
+                      index > 0 ? _paginatedLogs[index - 1].timestamp : null;
+
                   return TimelineEntry(
                     key: ValueKey(log.timestamp.toString()),
                     log: log,
@@ -840,6 +844,7 @@ class LogListPageState extends State<LogListPage> {
                       log,
                     ),
                     onDelete: () => _deleteLog(_logs.indexOf(log)),
+                    previousLogTimestamp: previousTimestamp, // 添加前一条日志的时间戳
                   );
                 },
               ),

@@ -17,6 +17,7 @@ class TimelineEntry extends StatefulWidget {
   final bool isLast;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final DateTime? previousLogTimestamp;
 
   const TimelineEntry({
     super.key,
@@ -25,6 +26,7 @@ class TimelineEntry extends StatefulWidget {
     this.isLast = false,
     required this.onEdit,
     required this.onDelete,
+    this.previousLogTimestamp,
   });
 
   @override
@@ -203,6 +205,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                       left: 22, // 调整左侧位置使圆圈能够居中在时间线上
                       child: _buildTimelineDot(timelineColor),
                     ),
+                    // 添加时间间隔标签
+                    if (!widget.isFirst) _buildTimeIntervalLabel(),
                   ],
                 ),
               ),
@@ -1344,6 +1348,197 @@ class _TimelineEntryState extends State<TimelineEntry> {
         content: Text(message),
         backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // 计算时间间隔的方法
+  Map<String, dynamic> _getTimeInterval() {
+    if (widget.previousLogTimestamp == null || widget.isFirst) {
+      return {'type': '', 'value': ''};
+    }
+
+    // 因为日志是按时间戳倒序排列的，所以前一条日志的时间戳比当前日志更近
+    final difference =
+        widget.previousLogTimestamp!.difference(widget.log.timestamp);
+
+    if (difference.inSeconds < 60) {
+      return {'type': '秒', 'value': '${difference.inSeconds}'};
+    } else if (difference.inMinutes < 60) {
+      return {'type': '分钟', 'value': '${difference.inMinutes}'};
+    } else if (difference.inHours < 24) {
+      // 计算小时和剩余的分钟
+      final int hours = difference.inHours;
+      final int minutes = difference.inMinutes % 60;
+      return {
+        'type': '小时',
+        'value': '$hours',
+        'hasMinutes': true,
+        'minutes': '$minutes'
+      };
+    } else if (difference.inDays < 30) {
+      return {'type': '天', 'value': '${difference.inDays}'};
+    } else if (difference.inDays < 365) {
+      return {'type': '个月', 'value': '${(difference.inDays / 30).round()}'};
+    } else {
+      return {'type': '年', 'value': '${(difference.inDays / 365).round()}'};
+    }
+  }
+
+  // 显示时间间隔的Widget
+  Widget _buildTimeIntervalLabel() {
+    final timeData = _getTimeInterval();
+    if (timeData['type'] == '') {
+      return const SizedBox.shrink();
+    }
+
+    // 标签应该位于时间轴线上，时间轴线的x坐标是44
+    const double timeLineX = 44.0;
+
+    // 增加标签宽度以适应更多内容
+    const double labelWidth = 62.0;
+    const double labelLeft = timeLineX - labelWidth / 2;
+
+    // 标签位置
+    const double labelTopPosition = 5.0;
+
+    // 根据时间类型选择颜色
+    MaterialColor baseColor;
+    IconData timeIcon;
+
+    if (timeData['type'] == '秒' || timeData['type'] == '分钟') {
+      baseColor = Colors.blue;
+      timeIcon = Icons.access_time;
+    } else if (timeData['type'] == '小时') {
+      baseColor = Colors.purple;
+      timeIcon = Icons.hourglass_top;
+    } else if (timeData['type'] == '天') {
+      baseColor = Colors.green;
+      timeIcon = Icons.calendar_today;
+    } else {
+      baseColor = Colors.orange;
+      timeIcon = Icons.date_range;
+    }
+
+    return Positioned(
+      top: labelTopPosition,
+      left: labelLeft,
+      child: Container(
+        width: labelWidth,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              baseColor.shade50,
+              Colors.white,
+            ],
+          ),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: baseColor.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: baseColor.withOpacity(0.2),
+              blurRadius: 5,
+              spreadRadius: 0,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    baseColor.shade300,
+                    baseColor.shade200,
+                  ],
+                ),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(9),
+                  topRight: Radius.circular(9),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    timeIcon,
+                    size: 10,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    '间隔',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                '${timeData['value']}${timeData['type']}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: baseColor.shade900,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            // 如果有分钟，添加额外一行
+            if (timeData['hasMinutes'] == true)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.only(bottom: 4, top: 2),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      baseColor.shade100,
+                      baseColor.shade50,
+                    ],
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(9),
+                    bottomRight: Radius.circular(9),
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.add_circle_outline,
+                      size: 8,
+                      color: baseColor.shade700,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      '${timeData['minutes']}分钟',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: baseColor.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
