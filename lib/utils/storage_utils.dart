@@ -56,8 +56,7 @@ class StorageUtils {
       }
       // 创建子目录
       await Directory(path.join(dirPath, 'images')).create(recursive: true);
-      await Directory(path.join(dirPath, 'videos')).create(recursive: true);
-      await Directory(path.join(dirPath, 'audios')).create(recursive: true);
+      // 移除音频目录
       return true;
     } catch (e) {
       debugPrint('Error creating directory: $e');
@@ -86,61 +85,9 @@ class StorageUtils {
     }
   }
 
-  static Future<String?> copyVideoToLocal(
-      String sourcePath, String storagePath) async {
-    try {
-      final dir = Directory(path.join(storagePath, 'videos'));
-      if (!(await dir.exists())) {
-        await dir.create(recursive: true);
-      }
-
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}.mp4';
-      final targetPath = path.join(dir.path, fileName);
-
-      final sourceFile = File(sourcePath);
-      await sourceFile.copy(targetPath);
-
-      return fileName;
-    } catch (e) {
-      debugPrint('Error copying video: $e');
-      return null;
-    }
-  }
-
-  static Future<String?> copyAudioToLocal(
-      String sourcePath, String storagePath) async {
-    try {
-      final dir = Directory(path.join(storagePath, 'audios'));
-      if (!(await dir.exists())) {
-        await dir.create(recursive: true);
-      }
-
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}.aac';
-      final targetPath = path.join(dir.path, fileName);
-
-      final sourceFile = File(sourcePath);
-      await sourceFile.copy(targetPath);
-
-      return fileName;
-    } catch (e) {
-      debugPrint('Error copying audio: $e');
-      return null;
-    }
-  }
-
   static Future<String> getFullImagePath(
       String fileName, String storagePath) async {
     return path.join(storagePath, 'images', fileName);
-  }
-
-  static Future<String> getFullVideoPath(
-      String fileName, String storagePath) async {
-    return path.join(storagePath, 'videos', fileName);
-  }
-
-  static Future<String> getFullAudioPath(
-      String fileName, String storagePath) async {
-    return path.join(storagePath, 'audios', fileName);
   }
 
   static Future<bool> showInitialStorageDialog(BuildContext context) async {

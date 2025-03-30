@@ -8,10 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
-import 'package:video_player/video_player.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 import '../models/log_entry.dart';
 import '../widgets/timeline_entry.dart';
@@ -504,70 +501,16 @@ class LogListPageState extends State<LogListPage> {
               ),
             ),
             Container(
-              margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Colors.green.shade400, Colors.green.shade300],
+                  colors: [Colors.green.shade500, Colors.green.shade400],
                 ),
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.green.shade200.withOpacity(0.5),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: FloatingActionButton(
-                heroTag: 'galleryPicker',
-                elevation: 0,
-                backgroundColor: Colors.transparent,
-                onPressed: () async {
-                  final List<AssetEntity>? result =
-                      await AssetPicker.pickAssets(
-                    context,
-                    pickerConfig: AssetPickerConfig(
-                      maxAssets: 1, // 单选模式
-                      requestType: RequestType.common, // 同时支持图片和视频
-                      limitedPermissionOverlayPredicate:
-                          (PermissionState state) => true, // 显示权限提示
-                      specialPickerType:
-                          SpecialPickerType.wechatMoment, // 使用朋友圈样式UI
-                      filterOptions: FilterOptionGroup(
-                        videoOption: FilterOption(
-                          durationConstraint: const DurationConstraint(
-                            max: Duration(seconds: 30), // 限制视频最大时长30秒
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-
-                  if (result != null && result.isNotEmpty && context.mounted) {
-                    final AssetEntity asset = result.first;
-                    await _handleAssetPick(context, asset);
-                  }
-                },
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.photo_library, size: 28),
-              ),
-            ),
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Colors.red.shade400, Colors.red.shade300],
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.red.shade200.withOpacity(0.5),
                     blurRadius: 10,
                     spreadRadius: 2,
                     offset: const Offset(0, 4),
@@ -590,7 +533,6 @@ class LogListPageState extends State<LogListPage> {
                     if (imagePath != null) {
                       await _showMediaDescriptionDialog(
                         context,
-                        isVideo: false,
                         mediaPath: imagePath,
                       );
                     }
@@ -608,101 +550,8 @@ class LogListPageState extends State<LogListPage> {
     );
   }
 
-  Future<void> _handleAssetPick(BuildContext context, AssetEntity asset) async {
-    if (asset.type == AssetType.video) {
-      // 处理视频
-      final File? videoFile = await asset.file;
-      if (videoFile == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('无法获取视频文件')),
-          );
-        }
-        return;
-      }
-
-      final int fileSize = await videoFile.length();
-      final double fileSizeInMB = fileSize / (1024 * 1024);
-
-      // 检查视频时长
-      if (asset.duration > 30) {
-        if (context.mounted) {
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('视频过长'),
-              content: const Text('选择的视频超过30秒，请选择更短的视频。'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('确定'),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
-      }
-
-      if (fileSizeInMB > 500) {
-        if (context.mounted) {
-          final bool shouldContinue = await showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('文件过大'),
-                  content: Text(
-                      '选择的视频文件大小为 ${fileSizeInMB.toStringAsFixed(2)}MB，建议选择较小的视频以获得更好的性能。是否继续？'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('继续'),
-                    ),
-                  ],
-                ),
-              ) ??
-              false;
-          if (!shouldContinue) return;
-        }
-      }
-
-      final videoPath = await _copyVideoToLocal(videoFile.path);
-      if (videoPath != null && context.mounted) {
-        await _showMediaDescriptionDialog(
-          context,
-          isVideo: true,
-          mediaPath: videoPath,
-        );
-      }
-    } else if (asset.type == AssetType.image) {
-      // 处理图片
-      final File? imageFile = await asset.file;
-      if (imageFile == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('无法获取图片文件')),
-          );
-        }
-        return;
-      }
-
-      final imagePath = await _copyImageToLocal(imageFile.path);
-      if (imagePath != null && context.mounted) {
-        await _showMediaDescriptionDialog(
-          context,
-          isVideo: false,
-          mediaPath: imagePath,
-        );
-      }
-    }
-  }
-
   Future<void> _showMediaDescriptionDialog(
     BuildContext context, {
-    required bool isVideo,
     required String mediaPath,
   }) async {
     String text = '';
@@ -775,7 +624,7 @@ class LogListPageState extends State<LogListPage> {
                       child: TextField(
                         autofocus: false,
                         decoration: InputDecoration(
-                          hintText: isVideo ? '为这段视频添加描述...' : '为这张照片添加描述...',
+                          hintText: '为这张照片添加描述...',
                           hintStyle: TextStyle(
                             color: Colors.grey.shade400,
                             fontSize: 16,
@@ -800,7 +649,7 @@ class LogListPageState extends State<LogListPage> {
                         valueListenable: ValueNotifier<String>(text),
                         builder: (context, value, child) {
                           return Text(
-                            '${text.length} 字',
+                            '${value.length} 字',
                             style: TextStyle(
                               color: Colors.grey.shade500,
                               fontSize: 14,
@@ -818,8 +667,7 @@ class LogListPageState extends State<LogListPage> {
                           setState(() {
                             _logs.add(LogEntry(
                               text: text,
-                              imagePath: isVideo ? null : mediaPath,
-                              videoPath: isVideo ? mediaPath : null,
+                              imagePath: mediaPath,
                               timestamp: DateTime.now(),
                             ));
                           });
@@ -1149,8 +997,6 @@ class LogListPageState extends State<LogListPage> {
                             _logs[index] = LogEntry(
                               text: text,
                               imagePath: oldLog.imagePath,
-                              videoPath: oldLog.videoPath,
-                              audioPath: oldLog.audioPath,
                               timestamp: oldLog.timestamp,
                               latitude: oldLog.latitude,
                               longitude: oldLog.longitude,
@@ -1201,32 +1047,13 @@ class LogListPageState extends State<LogListPage> {
   }
 
   Future<String> getFullVideoPath(String fileName) async {
-    if (_customStoragePath == null) {
-      _customStoragePath = await StorageUtils.getDefaultStoragePath();
-    }
-    return path.join(_customStoragePath!, 'videos', fileName);
-  }
-
-  Future<String> getFullAudioPath(String fileName) async {
-    if (_customStoragePath == null) {
-      _customStoragePath = await StorageUtils.getDefaultStoragePath();
-    }
-    return path.join(_customStoragePath!, 'audios', fileName);
+    // 返回空字符串，因为移除了视频功能
+    return '';
   }
 
   Future<String?> _copyImageToLocal(String sourcePath) async {
     if (_customStoragePath == null) return null;
     return StorageUtils.copyImageToLocal(sourcePath, _customStoragePath!);
-  }
-
-  Future<String?> _copyVideoToLocal(String sourcePath) async {
-    if (_customStoragePath == null) return null;
-    return StorageUtils.copyVideoToLocal(sourcePath, _customStoragePath!);
-  }
-
-  Future<String?> _copyAudioToLocal(String sourcePath) async {
-    if (_customStoragePath == null) return null;
-    return StorageUtils.copyAudioToLocal(sourcePath, _customStoragePath!);
   }
 
   List<DateTime> _getUniqueDates() {

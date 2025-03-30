@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
-import 'package:chewie/chewie.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'package:share_plus/share_plus.dart';
@@ -34,18 +32,11 @@ class TimelineEntry extends StatefulWidget {
 }
 
 class _TimelineEntryState extends State<TimelineEntry> {
-  VideoPlayerController? _videoController;
-  bool _isVideoInitialized = false;
-  static final Map<String, VideoPlayerController> _controllerCache = {};
   static final Map<String, ImageProvider> _imageCache = {};
-  static const int _maxCachedControllers = 3;
 
   @override
   void initState() {
     super.initState();
-    if (widget.log.videoPath != null) {
-      _initializeVideoController();
-    }
     if (widget.log.imagePath != null) {
       _preloadImage();
     }
@@ -78,79 +69,18 @@ class _TimelineEntryState extends State<TimelineEntry> {
 
   @override
   void dispose() {
-    _disposeController();
     super.dispose();
-  }
-
-  void _disposeController() {
-    if (_videoController != null) {
-      if (!_controllerCache.containsValue(_videoController)) {
-        _videoController!.dispose();
-      }
-      _videoController = null;
-      _isVideoInitialized = false;
-    }
-  }
-
-  Future<void> _initializeVideoController() async {
-    if (widget.log.videoPath == null) return;
-
-    try {
-      final logListState = context.findAncestorStateOfType<LogListPageState>();
-      if (logListState == null) return;
-
-      final fullPath =
-          await logListState.getFullVideoPath(widget.log.videoPath!);
-
-      // 检查缓存
-      if (_controllerCache.containsKey(fullPath)) {
-        _videoController = _controllerCache[fullPath];
-        _isVideoInitialized = true;
-        if (mounted) setState(() {});
-        return;
-      }
-
-      // 创建新控制器
-      final controller = VideoPlayerController.file(File(fullPath));
-      await controller.initialize();
-      await controller.setVolume(0.0);
-      await controller.seekTo(Duration.zero);
-
-      // 缓存控制器
-      _controllerCache[fullPath] = controller;
-
-      // 限制缓存数量
-      if (_controllerCache.length > _maxCachedControllers) {
-        final oldestKey = _controllerCache.keys.first;
-        final oldestController = _controllerCache.remove(oldestKey);
-        oldestController?.dispose();
-      }
-
-      if (!mounted) {
-        controller.dispose();
-        return;
-      }
-
-      _videoController = controller;
-      _isVideoInitialized = true;
-      setState(() {});
-    } catch (e) {
-      debugPrint('Error initializing video controller: $e');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     // 根据日志类型确定时间点的颜色
-    final Color timelineColor = widget.log.videoPath != null
-        ? Colors.red.shade400
-        : widget.log.imagePath != null
-            ? Colors.green.shade400
-            : Colors.blue.shade400;
+    final Color timelineColor = widget.log.imagePath != null
+        ? Colors.green.shade400
+        : Colors.blue.shade400;
 
     // 根据内容类型计算时间点的垂直位置
-    final bool hasMedia =
-        widget.log.imagePath != null || widget.log.videoPath != null;
+    final bool hasMedia = widget.log.imagePath != null;
     final double timelineDotPosition = hasMedia ? 130.0 : 70.0; // 根据卡片高度计算中间位置
 
     return Row(
@@ -161,10 +91,9 @@ class _TimelineEntryState extends State<TimelineEntry> {
           child: Stack(
             children: [
               SizedBox(
-                height:
-                    widget.log.imagePath != null || widget.log.videoPath != null
-                        ? 280 // 有图片或视频时的高度
-                        : 140, // 只有文本时的高度
+                height: widget.log.imagePath != null
+                    ? 280 // 有图片时的高度
+                    : 140, // 只有文本时的高度
                 child: Stack(
                   children: [
                     // 时间线竖线 - 改进样式
@@ -672,17 +601,8 @@ class _TimelineEntryState extends State<TimelineEntry> {
                           child: _buildImagePreview(),
                         ),
                       ),
-                    if (widget.log.videoPath != null)
-                      Container(
-                        margin: const EdgeInsets.symmetric(vertical: 12),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: _buildVideoPreview(),
-                        ),
-                      ),
-                    // 添加第二条分割线 (在图片/视频后)
-                    if (widget.log.imagePath != null ||
-                        widget.log.videoPath != null)
+                    // 添加图片后的分隔线
+                    if (widget.log.imagePath != null)
                       Divider(
                         height: 1,
                         thickness: 1.5,
@@ -814,140 +734,6 @@ class _TimelineEntryState extends State<TimelineEntry> {
               right: 12,
               child: GestureDetector(
                 onTap: () => _shareImage(fullPath),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.5),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.share,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildVideoPreview() {
-    if (!_isVideoInitialized || _videoController == null) {
-      return const SizedBox(
-        height: 200,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return FutureBuilder<String>(
-      future: context
-          .findAncestorStateOfType<LogListPageState>()
-          ?.getFullVideoPath(widget.log.videoPath!),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const SizedBox(
-            height: 200,
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final fullPath = snapshot.data!;
-
-        return Stack(
-          children: [
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => Scaffold(
-                      backgroundColor: Colors.black,
-                      appBar: AppBar(
-                        backgroundColor: Colors.black,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        actions: [
-                          IconButton(
-                            icon: const Icon(
-                              Icons.share,
-                              color: Colors.white,
-                            ),
-                            onPressed: () => _shareVideo(fullPath),
-                          ),
-                        ],
-                      ),
-                      body: Center(
-                        child: AspectRatio(
-                          aspectRatio: _videoController!.value.aspectRatio,
-                          child: Chewie(
-                            controller: ChewieController(
-                              videoPlayerController: _videoController!,
-                              autoPlay: true,
-                              looping: false,
-                              allowMuting: true,
-                              allowPlaybackSpeedChanging: true,
-                              showControls: true,
-                              errorBuilder: (context, errorMessage) {
-                                return Center(
-                                  child: Text(
-                                    '加载视频时出错: $errorMessage',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ).then((_) {
-                  // 页面关闭时暂停视频播放
-                  if (_videoController != null &&
-                      _videoController!.value.isPlaying) {
-                    _videoController!.pause();
-                  }
-                });
-              },
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Container(
-                    constraints: const BoxConstraints(
-                      maxHeight: 200,
-                    ),
-                    width: double.infinity,
-                    child: AspectRatio(
-                      aspectRatio: _videoController!.value.aspectRatio,
-                      child: VideoPlayer(_videoController!),
-                    ),
-                  ),
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.play_arrow,
-                      color: Colors.white,
-                      size: 36,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 添加分享按钮
-            Positioned(
-              top: 12,
-              right: 12,
-              child: GestureDetector(
-                onTap: () => _shareVideo(fullPath),
                 child: Container(
                   width: 40,
                   height: 40,
@@ -1198,161 +984,107 @@ class _TimelineEntryState extends State<TimelineEntry> {
     }
   }
 
-  // 添加分享视频的方法
-  void _shareVideo(String videoPath) async {
-    try {
-      // 显示分享菜单
-      await _showShareOptions(videoPath, isImage: false);
-    } catch (e) {
-      _showErrorSnackBar('分享视频失败: $e');
-    }
-  }
-
   // 显示分享选项
   Future<void> _showShareOptions(String filePath,
       {required bool isImage}) async {
-    final type = isImage ? '图片' : '视频';
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      builder: (context) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 10,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
+    final String type = isImage ? '图片' : '音频';
+    final String result = await showModalBottomSheet<String>(
+          context: context,
+          builder: (BuildContext context) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.share, color: Colors.blue.shade700),
+                    ),
+                    title: Text(
+                      '系统分享',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue.shade800,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '使用系统分享菜单分享$type',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(context, 'system'),
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.copy, color: Colors.green.shade700),
+                    ),
+                    title: Text(
+                      '复制到剪贴板',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green.shade800,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '复制$type路径到剪贴板',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(context, 'copy'),
+                  ),
+                  const SizedBox(height: 24),
+                ],
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                '分享$type',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade800,
-                ),
-              ),
-            ),
-            const Divider(thickness: 1.0),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.share, color: Colors.blue.shade700),
-              ),
-              title: Text(
-                '系统分享',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue.shade800,
-                ),
-              ),
-              subtitle: Text(
-                '使用系统分享菜单分享$type',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              onTap: () => Navigator.pop(context, 'system'),
-            ),
-            const Divider(height: 1, indent: 70),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.copy, color: Colors.green.shade700),
-              ),
-              title: Text(
-                '复制到剪贴板',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green.shade800,
-                ),
-              ),
-              subtitle: Text(
-                '复制$type路径到剪贴板',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              onTap: () => Navigator.pop(context, 'copy'),
-            ),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
-    );
+            );
+          },
+        ) ??
+        '';
 
     if (result == 'system') {
       // 实现系统分享
       _shareFile(filePath);
     } else if (result == 'copy') {
-      // 复制路径到剪贴板
+      // 实现复制到剪贴板
       await Clipboard.setData(ClipboardData(text: filePath));
-      _showSuccessSnackBar('已复制路径到剪贴板');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$type路径已复制到剪贴板'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
-  // 分享文件
+  // 使用share_plus实现分享
   Future<void> _shareFile(String filePath) async {
-    try {
-      await Share.shareXFiles([XFile(filePath)]);
-    } catch (e) {
-      _showErrorSnackBar('分享失败: $e');
-    }
+    final file = XFile(filePath);
+    await Share.shareXFiles([file]);
   }
 
-  // 显示错误提示
+  // 显示错误信息
   void _showErrorSnackBar(String message) {
-    if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  // 显示成功提示
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
       ),
     );
