@@ -905,7 +905,13 @@ class _TimelineEntryState extends State<TimelineEntry> {
                       ),
                     ),
                   ),
-                );
+                ).then((_) {
+                  // 页面关闭时暂停视频播放
+                  if (_videoController != null &&
+                      _videoController!.value.isPlaying) {
+                    _videoController!.pause();
+                  }
+                });
               },
               child: Stack(
                 alignment: Alignment.center,
